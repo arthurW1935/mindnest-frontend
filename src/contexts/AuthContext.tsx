@@ -5,7 +5,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 interface User {
   id: number;
   email: string;
-  role: 'user' | 'psychiatrist';
+  role: 'user' | 'psychiatrist' | 'admin';
   isActive: boolean;
   createdAt: string;
 }
@@ -21,10 +21,11 @@ interface AuthContextType {
   tokens: AuthTokens | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, role: 'user' | 'psychiatrist') => Promise<void>;
+  login: (email: string, password: string) => Promise<{ user: User; redirectPath: string }>;
+  register: (email: string, password: string, role: 'user' | 'psychiatrist') => Promise<{ user: User; redirectPath: string }>;
   logout: () => void;
   refreshToken: () => Promise<boolean>;
+  getRedirectPath: (role: string) => string;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -45,32 +46,60 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [tokens, setTokens] = useState<AuthTokens | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [lastTokenCheck, setLastTokenCheck] = useState<number>(0);
 
   const API_BASE_URL = process.env.NEXT_PUBLIC_AUTH_SERVICE_URL || 'http://localhost:3001';
 
   const isAuthenticated = !!user && !!tokens;
 
+  // Helper function to get redirect path based on role
+  const getRedirectPath = (role: string): string => {
+    switch (role) {
+      case 'admin':
+        return '/admin';
+      case 'psychiatrist':
+        return '/dashboard/therapist'; // Keep existing folder structure
+      case 'user':
+        return '/dashboard/user';
+      default:
+        console.error('Unknown role:', role);
+        return '/dashboard/user'; // Default fallback
+    }
+  };
+
   // Load stored tokens on mount
   useEffect(() => {
     const initAuth = async () => {
-      const storedTokens = localStorage.getItem('mindnest_tokens');
-      const storedUser = localStorage.getItem('mindnest_user');
-      
-      if (storedTokens && storedUser) {
-        try {
+      try {
+        const storedTokens = localStorage.getItem('mindnest_tokens');
+        const storedUser = localStorage.getItem('mindnest_user');
+        
+        if (storedTokens && storedUser) {
           const parsedTokens = JSON.parse(storedTokens);
           const parsedUser = JSON.parse(storedUser);
+          
+          // Set tokens and user immediately
           setTokens(parsedTokens);
           setUser(parsedUser);
           
-          // Verify token is still valid
-          await verifyToken(parsedTokens.accessToken);
-        } catch (error) {
-          console.error('Auth initialization error:', error);
-          clearAuthData();
+          // Only verify token if it hasn't been checked in the last 5 minutes
+          const now = Date.now();
+          if (now - lastTokenCheck > 5 * 60 * 1000) {
+            try {
+              await verifyToken(parsedTokens.accessToken);
+              setLastTokenCheck(now);
+            } catch (error) {
+              console.error('Token verification failed during init:', error);
+              clearAuthData();
+            }
+          }
         }
+      } catch (error) {
+        console.error('Auth initialization error:', error);
+        clearAuthData();
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
     };
 
     initAuth();
@@ -81,6 +110,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setTokens(null);
     localStorage.removeItem('mindnest_tokens');
     localStorage.removeItem('mindnest_user');
+    
+    // Clear cookies too
+    document.cookie = 'mindnest_tokens=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+    document.cookie = 'mindnest_user=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;';
   };
 
   const verifyToken = async (token: string) => {
@@ -95,6 +128,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (!response.ok) {
         throw new Error('Token verification failed');
       }
+
+      const data = await response.json();
+      return data;
     } catch (error) {
       console.error('Token verification failed:', error);
       clearAuthData();
@@ -102,7 +138,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string): Promise<{ user: User; redirectPath: string }> => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: 'POST',
@@ -120,20 +156,33 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       if (data.success && data.data) {
         const { user: userData, tokens: tokenData } = data.data;
+        
+        // Set state immediately
         setUser(userData);
         setTokens(tokenData);
+        setLastTokenCheck(Date.now());
         
-        // Store in localStorage
+        // Store in localStorage and cookies
         localStorage.setItem('mindnest_tokens', JSON.stringify(tokenData));
         localStorage.setItem('mindnest_user', JSON.stringify(userData));
+        
+        // Also store in cookies for middleware
+        document.cookie = `mindnest_tokens=${JSON.stringify(tokenData)}; path=/; max-age=${7 * 24 * 60 * 60}`; // 7 days
+        document.cookie = `mindnest_user=${JSON.stringify(userData)}; path=/; max-age=${7 * 24 * 60 * 60}`; // 7 days
+
+        // Return user data and redirect path
+        const redirectPath = getRedirectPath(userData.role);
+        return { user: userData, redirectPath };
       }
+
+      throw new Error('Invalid response format');
     } catch (error) {
       console.error('Login error:', error);
       throw error;
     }
   };
 
-  const register = async (email: string, password: string, role: 'user' | 'psychiatrist') => {
+  const register = async (email: string, password: string, role: 'user' | 'psychiatrist'): Promise<{ user: User; redirectPath: string }> => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: 'POST',
@@ -151,13 +200,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       if (data.success && data.data) {
         const { user: userData, tokens: tokenData } = data.data;
+        
+        // Set state immediately
         setUser(userData);
         setTokens(tokenData);
+        setLastTokenCheck(Date.now());
         
-        // Store in localStorage
+        // Store in localStorage and cookies
         localStorage.setItem('mindnest_tokens', JSON.stringify(tokenData));
         localStorage.setItem('mindnest_user', JSON.stringify(userData));
+        
+        // Also store in cookies for middleware
+        document.cookie = `mindnest_tokens=${JSON.stringify(tokenData)}; path=/; max-age=${7 * 24 * 60 * 60}`; // 7 days
+        document.cookie = `mindnest_user=${JSON.stringify(userData)}; path=/; max-age=${7 * 24 * 60 * 60}`; // 7 days
+
+        // Return user data and redirect path
+        const redirectPath = getRedirectPath(userData.role);
+        return { user: userData, redirectPath };
       }
+
+      throw new Error('Invalid response format');
     } catch (error) {
       console.error('Registration error:', error);
       throw error;
@@ -205,6 +267,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (data.success && data.data) {
         const newTokens = data.data.tokens;
         setTokens(newTokens);
+        setLastTokenCheck(Date.now());
         localStorage.setItem('mindnest_tokens', JSON.stringify(newTokens));
         return true;
       }
@@ -226,6 +289,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     register,
     logout,
     refreshToken,
+    getRedirectPath,
   };
 
   return (

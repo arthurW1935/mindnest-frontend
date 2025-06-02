@@ -194,7 +194,10 @@ export default function UserDashboard() {
               </div>
             </Link>
 
-            <div className="relative group bg-white p-6 rounded-lg shadow opacity-50 cursor-not-allowed">
+            <Link
+              href="/dashboard/find-therapists"
+              className="relative group bg-white p-6 focus-within:ring-2 focus-within:ring-inset focus-within:ring-green-500 rounded-lg shadow hover:shadow-md transition-shadow"
+            >
               <div>
                 <span className="rounded-lg inline-flex p-3 bg-green-50 text-green-600 ring-4 ring-white">
                   <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -203,15 +206,20 @@ export default function UserDashboard() {
                 </span>
               </div>
               <div className="mt-4">
-                <h3 className="text-lg font-medium text-gray-900">Find Therapists</h3>
+                <h3 className="text-lg font-medium text-gray-900">
+                  <span className="absolute inset-0" aria-hidden="true" />
+                  Find Therapists
+                </h3>
                 <p className="mt-2 text-sm text-gray-500">
                   Connect with licensed mental health professionals
                 </p>
-                <span className="mt-2 text-xs text-gray-400">Coming Soon</span>
               </div>
-            </div>
+            </Link>
 
-            <div className="relative group bg-white p-6 rounded-lg shadow opacity-50 cursor-not-allowed">
+            <Link
+              href="/dashboard/appointments"
+              className="relative group bg-white p-6 focus-within:ring-2 focus-within:ring-inset focus-within:ring-purple-500 rounded-lg shadow hover:shadow-md transition-shadow opacity-50 cursor-not-allowed pointer-events-none"
+            >
               <div>
                 <span className="rounded-lg inline-flex p-3 bg-purple-50 text-purple-600 ring-4 ring-white">
                   <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -220,13 +228,15 @@ export default function UserDashboard() {
                 </span>
               </div>
               <div className="mt-4">
-                <h3 className="text-lg font-medium text-gray-900">Book Sessions</h3>
+                <h3 className="text-lg font-medium text-gray-900">
+                  <span className="absolute inset-0" aria-hidden="true" />
+                  My Appointments
+                </h3>
                 <p className="mt-2 text-sm text-gray-500">
-                  Schedule therapy appointments and sessions
+                  View and manage your therapy sessions (Coming Soon)
                 </p>
-                <span className="mt-2 text-xs text-gray-400">Coming Soon</span>
               </div>
-            </div>
+            </Link>
           </div>
         </div>
 
@@ -409,14 +419,20 @@ export default function UserDashboard() {
                 </svg>
                 <h3 className="mt-2 text-sm font-medium text-gray-900">No activity yet</h3>
                 <p className="mt-1 text-sm text-gray-500">
-                  Start your wellness journey by completing your profile or booking a session.
+                  Start your wellness journey by completing your profile or finding a therapist.
                 </p>
-                <div className="mt-6">
+                <div className="mt-6 flex space-x-3 justify-center">
                   <Link
                     href="/dashboard/profile"
                     className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
                   >
                     Complete Profile
+                  </Link>
+                  <Link
+                    href="/dashboard/find-therapists"
+                    className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Find Therapists
                   </Link>
                 </div>
               </div>
