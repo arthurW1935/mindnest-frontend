@@ -26,6 +26,35 @@ A modern, responsive web application for the MindNest mental health platform. Bu
   - Therapist Service (port 3003)
   - Booking Service (port 3000)
 
+## 🏗️ MindNest Microservices Architecture
+
+This frontend is part of the MindNest microservices ecosystem. The following microservices are available:
+
+### Available Microservices
+
+1. **MindNest Auth Service** - Authentication and authorization
+   - **Port**: 3001
+   - **GitHub**: [mindnest-auth-service](https://github.com/arthurW1935/mindnest-auth-service)
+   - **Features**: JWT authentication, user registration, role-based access control
+
+2. **MindNest User Service** - User profile and preferences management
+   - **Port**: 3002
+   - **GitHub**: [mindnest-user-service](https://github.com/arthurW1935/mindnest-user-service)
+   - **Features**: User profiles, preferences, mental health data
+
+3. **MindNest Therapist Service** - Therapist management and availability
+   - **Port**: 3003
+   - **GitHub**: [mindnest-therapist-service](https://github.com/arthurW1935/mindnest-therapist-service)
+   - **Features**: Therapist profiles, availability management, client relationships
+
+4. **MindNest Booking Service** - Appointment scheduling and management
+   - **Port**: 3004
+   - **GitHub**: [mindnest-booking-service](https://github.com/kohantikanath/mindnest-booking-service)
+   - **Features**: Session booking, time slot management, appointment lifecycle
+
+### Service Communication
+All microservices communicate via REST APIs and use JWT tokens for authentication. The frontend acts as the client that orchestrates interactions between these services.
+
 ## 🛠️ Installation
 
 1. **Clone the repository**
