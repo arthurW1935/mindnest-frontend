@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { therapistApi, TherapistProfile, TherapistSearchFilters, Specialization, Approach } from '@/lib/therapistApi';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import BookingModal from '@/components/BookingModal';
 
 export default function FindTherapistsPage() {
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -23,6 +24,13 @@ export default function FindTherapistsPage() {
   const [availableSpecializations, setAvailableSpecializations] = useState<Specialization[]>([]);
   const [availableApproaches, setAvailableApproaches] = useState<Approach[]>([]);
   const [showFilters, setShowFilters] = useState(false);
+
+  // Booking modal state
+  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [selectedTherapistForBooking, setSelectedTherapistForBooking] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -121,6 +129,25 @@ export default function FindTherapistsPage() {
       limit: 12,
       sort_by: 'rating'
     });
+  };
+
+  const handleBookSession = (therapist: TherapistProfile) => {
+    setSelectedTherapistForBooking({
+      id: therapist.auth_user_id || -1,
+      name: `Dr. ${therapist.first_name} ${therapist.last_name}`
+    });
+    setShowBookingModal(true);
+  };
+
+  const handleBookingSuccess = (booking: any) => {
+    console.log('Booking created successfully:', booking);
+    // You can add additional success handling here, like showing a notification
+    // or redirecting to a booking confirmation page
+  };
+
+  const handleCloseBookingModal = () => {
+    setShowBookingModal(false);
+    setSelectedTherapistForBooking(null);
   };
 
   const generatePaginationPages = () => {
@@ -418,7 +445,10 @@ export default function FindTherapistsPage() {
                     >
                       View Profile
                     </Link>
-                    <button className="flex-1 px-4 py-2 border border-transparent rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700">
+                    <button 
+                      onClick={() => handleBookSession(therapist)}
+                      className="flex-1 px-4 py-2 border border-transparent rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+                    >
                       Book Session
                     </button>
                   </div>
@@ -508,6 +538,17 @@ export default function FindTherapistsPage() {
           </div>
         )}
       </div>
+
+      {/* Booking Modal */}
+      {showBookingModal && selectedTherapistForBooking && (
+        <BookingModal
+          isOpen={showBookingModal}
+          onClose={handleCloseBookingModal}
+          therapistId={selectedTherapistForBooking.id}
+          therapistName={selectedTherapistForBooking.name}
+          onBookingSuccess={handleBookingSuccess}
+        />
+      )}
     </div>
   );
 }

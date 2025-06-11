@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { userApi, UserProfile } from '@/lib/userApi';
+import { bookingApi } from '@/lib/bookingApi';
 import Link from 'next/link';
 
 export default function UserDashboard() {
@@ -12,6 +13,13 @@ export default function UserDashboard() {
   const [profile, setProfile] = useState<UserProfile>({});
   const [completionPercentage, setCompletionPercentage] = useState(0);
   const [profilePictureUrl, setProfilePictureUrl] = useState('');
+  const [upcomingBookings, setUpcomingBookings] = useState<any[]>([]);
+  const [totalBookings, setTotalBookings] = useState(0);
+  const [stats, setStats] = useState({
+    totalSessions: 0,
+    upcomingSessions: 0,
+    completedSessions: 0
+  });
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -35,6 +43,28 @@ export default function UserDashboard() {
         setProfile(profileResponse.data.profile);
         setCompletionPercentage(profileResponse.data.completion_percentage);
         setProfilePictureUrl(profileResponse.data.profile.profile_picture_url || '');
+      }
+
+      // Fetch booking data
+      if (user?.id) {
+        const bookingResponse = await bookingApi.getPatientBookings(user.id);
+        if (bookingResponse.success && bookingResponse.data) {
+          const bookings = bookingResponse.data;
+          const today = new Date().toISOString().split('T')[0];
+          
+          const upcoming = bookings.filter(b => 
+            b.sessionDate >= today && b.status === 'confirmed'
+          );
+          const completed = bookings.filter(b => b.status === 'completed');
+          
+          setUpcomingBookings(upcoming);
+          setTotalBookings(bookings.length);
+          setStats({
+            totalSessions: bookings.length,
+            upcomingSessions: upcoming.length,
+            completedSessions: completed.length
+          });
+        }
       }
     } catch (error) {
       console.error('Error fetching user data:', error);
@@ -143,6 +173,35 @@ export default function UserDashboard() {
               </div>
             </div>
           )}
+
+          {/* Upcoming Sessions Alert */}
+          {upcomingBookings.length > 0 && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+              <div className="flex items-center">
+                <div className="flex-shrink-0">
+                  <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div className="ml-3 flex-1">
+                  <h3 className="text-sm font-medium text-green-800">
+                    You have {upcomingBookings.length} upcoming session{upcomingBookings.length > 1 ? 's' : ''}
+                  </h3>
+                  <div className="mt-2 text-sm text-green-700">
+                    <p>Next session: {new Date(upcomingBookings[0].sessionDate).toLocaleDateString()} at {new Date(`${upcomingBookings[0].sessionDate}T${upcomingBookings[0].sessionStartTime}`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p>
+                  </div>
+                  <div className="mt-3">
+                    <Link
+                      href="/dashboard/appointments"
+                      className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-green-700 bg-green-100 hover:bg-green-200"
+                    >
+                      View Appointments
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Quick Actions */}
@@ -218,7 +277,7 @@ export default function UserDashboard() {
 
             <Link
               href="/dashboard/appointments"
-              className="relative group bg-white p-6 focus-within:ring-2 focus-within:ring-inset focus-within:ring-purple-500 rounded-lg shadow hover:shadow-md transition-shadow opacity-50 cursor-not-allowed pointer-events-none"
+              className="relative group bg-white p-6 focus-within:ring-2 focus-within:ring-inset focus-within:ring-purple-500 rounded-lg shadow hover:shadow-md transition-shadow"
             >
               <div>
                 <span className="rounded-lg inline-flex p-3 bg-purple-50 text-purple-600 ring-4 ring-white">
@@ -233,7 +292,7 @@ export default function UserDashboard() {
                   My Appointments
                 </h3>
                 <p className="mt-2 text-sm text-gray-500">
-                  View and manage your therapy sessions (Coming Soon)
+                  View and manage your therapy sessions
                 </p>
               </div>
             </Link>
@@ -343,16 +402,16 @@ export default function UserDashboard() {
                 <div className="flex items-center">
                   <div className="flex-shrink-0">
                     <div className="w-8 h-8 bg-green-100 rounded-md flex items-center justify-center">
-                      <span className="text-green-600 font-semibold">0</span>
+                      <span className="text-green-600 font-semibold">{stats.totalSessions}</span>
                     </div>
                   </div>
                   <div className="ml-5 w-0 flex-1">
                     <dl>
                       <dt className="text-sm font-medium text-gray-500 truncate">
-                        Sessions Booked
+                        Total Sessions
                       </dt>
                       <dd className="text-lg font-medium text-gray-900">
-                        0
+                        {stats.totalSessions}
                       </dd>
                     </dl>
                   </div>
@@ -365,16 +424,16 @@ export default function UserDashboard() {
                 <div className="flex items-center">
                   <div className="flex-shrink-0">
                     <div className="w-8 h-8 bg-yellow-100 rounded-md flex items-center justify-center">
-                      <span className="text-yellow-600 font-semibold">0</span>
+                      <span className="text-yellow-600 font-semibold">{stats.upcomingSessions}</span>
                     </div>
                   </div>
                   <div className="ml-5 w-0 flex-1">
                     <dl>
                       <dt className="text-sm font-medium text-gray-500 truncate">
-                        Days Streak
+                        Upcoming Sessions
                       </dt>
                       <dd className="text-lg font-medium text-gray-900">
-                        0
+                        {stats.upcomingSessions}
                       </dd>
                     </dl>
                   </div>
@@ -408,34 +467,73 @@ export default function UserDashboard() {
           </div>
         </div>
 
-        {/* Recent Activity Placeholder */}
+        {/* Recent Activity */}
         <div className="px-4 py-6 sm:px-0">
           <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">Recent Activity</h3>
           <div className="bg-white shadow rounded-lg">
             <div className="p-6">
-              <div className="text-center py-12">
-                <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                </svg>
-                <h3 className="mt-2 text-sm font-medium text-gray-900">No activity yet</h3>
-                <p className="mt-1 text-sm text-gray-500">
-                  Start your wellness journey by completing your profile or finding a therapist.
-                </p>
-                <div className="mt-6 flex space-x-3 justify-center">
-                  <Link
-                    href="/dashboard/profile"
-                    className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-                  >
-                    Complete Profile
-                  </Link>
-                  <Link
-                    href="/dashboard/find-therapists"
-                    className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-                  >
-                    Find Therapists
-                  </Link>
+              {stats.totalSessions > 0 ? (
+                <div className="space-y-4">
+                  {upcomingBookings.slice(0, 3).map((booking) => (
+                    <div key={booking.id} className="flex items-center space-x-4 p-3 bg-gray-50 rounded-md">
+                      <div className="flex-shrink-0">
+                        <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                          <svg className="h-4 w-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                        </div>
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-gray-900">
+                          Upcoming session scheduled
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          {new Date(booking.sessionDate).toLocaleDateString()} at{' '}
+                          {new Date(`${booking.sessionDate}T${booking.sessionStartTime}`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                        </p>
+                      </div>
+                      <div className="flex-shrink-0">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                          Confirmed
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                  
+                  <div className="text-center pt-4">
+                    <Link
+                      href="/dashboard/appointments"
+                      className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                    >
+                      View all appointments →
+                    </Link>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="text-center py-12">
+                  <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                  <h3 className="mt-2 text-sm font-medium text-gray-900">No activity yet</h3>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Start your wellness journey by completing your profile or finding a therapist.
+                  </p>
+                  <div className="mt-6 flex space-x-3 justify-center">
+                    <Link
+                      href="/dashboard/profile"
+                      className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                    >
+                      Complete Profile
+                    </Link>
+                    <Link
+                      href="/dashboard/find-therapists"
+                      className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                    >
+                      Find Therapists
+                    </Link>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

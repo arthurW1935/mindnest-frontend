@@ -119,12 +119,16 @@ interface UserProfile {
     async exportUserData(): Promise<ApiResponse> {
       return this.makeRequest('/api/users/me/export');
     }
+
+    async getUserByAuthId(id: Number): Promise<ApiResponse<{ user: any }>> {
+      return this.makeRequest(`/api/users/auth/${id}`);
+    }
   
     // Profile Management
     async getCurrentUserProfile(): Promise<ApiResponse<{ profile: UserProfile; completion_percentage: number }>> {
       return this.makeRequest('/api/profile/me');
     }
-  
+ 
     async updateCurrentUserProfile(profileData: UserProfile): Promise<ApiResponse<{ profile: UserProfile; completion_percentage: number }>> {
       return this.makeRequest('/api/profile/me', {
         method: 'PUT',
@@ -199,6 +203,7 @@ interface UserProfile {
         method: 'POST',
       });
     }
+    
   }
   
   export const userApi = new UserApiClient();

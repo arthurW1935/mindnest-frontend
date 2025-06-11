@@ -2,25 +2,25 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { therapistApi, AvailabilityTemplate, AvailabilitySlot } from '@/lib/therapistApi';
+import { bookingApi, TimeSlotTemplate, TimeSlot } from '@/lib/bookingApi';
 import { useRouter } from 'next/navigation';
 
 const daysOfWeek = [
-  { value: 0, name: 'Sunday' },
-  { value: 1, name: 'Monday' },
-  { value: 2, name: 'Tuesday' },
-  { value: 3, name: 'Wednesday' },
-  { value: 4, name: 'Thursday' },
-  { value: 5, name: 'Friday' },
-  { value: 6, name: 'Saturday' },
+  { value: 'monday', name: 'Monday' },
+  { value: 'tuesday', name: 'Tuesday' },
+  { value: 'wednesday', name: 'Wednesday' },
+  { value: 'thursday', name: 'Thursday' },
+  { value: 'friday', name: 'Friday' },
+  { value: 'saturday', name: 'Saturday' },
+  { value: 'sunday', name: 'Sunday' },
 ];
 
 export default function TherapistAvailabilityPage() {
   const { user, isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
   
-  const [templates, setTemplates] = useState<AvailabilityTemplate[]>([]);
-  const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
+  const [templates, setTemplates] = useState<TimeSlotTemplate[]>([]);
+  const [slots, setSlots] = useState<TimeSlot[]>([]);
   const [calendarData, setCalendarData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -29,29 +29,28 @@ export default function TherapistAvailabilityPage() {
   
   // Template form state
   const [showTemplateModal, setShowTemplateModal] = useState(false);
-  const [editingTemplate, setEditingTemplate] = useState<AvailabilityTemplate | null>(null);
-  const [templateForm, setTemplateForm] = useState<Partial<AvailabilityTemplate>>({
-    day_of_week: 1,
-    start_time: '09:00',
-    end_time: '17:00',
-    session_duration: 50,
-    break_between_sessions: 10,
-    is_active: true
+  const [editingTemplate, setEditingTemplate] = useState<TimeSlotTemplate | null>(null);
+  const [templateForm, setTemplateForm] = useState<Partial<TimeSlotTemplate>>({
+    dayOfWeek: 'monday',
+    startTime: '09:00',
+    endTime: '17:00',
+    sessionDuration: 50,
+    breakTime: 10,
+    isActive: true
   });
 
   // Generate slots form state
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [generateForm, setGenerateForm] = useState({
-    template_id: 0,
-    start_date: '',
-    end_date: '',
-    exclude_dates: [] as string[]
+    templateId: '',
+    startDate: '',
+    endDate: ''
   });
 
   // Date range for viewing slots/calendar
   const [dateRange, setDateRange] = useState({
-    start_date: new Date().toISOString().split('T')[0],
-    end_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   });
 
   useEffect(() => {
@@ -63,7 +62,7 @@ export default function TherapistAvailabilityPage() {
   }, [isLoading, isAuthenticated, user, router]);
 
   useEffect(() => {
-    if (isAuthenticated && user?.role === 'psychiatrist') {
+    if (isAuthenticated && user?.role === 'psychiatrist' && user.id) {
       fetchData();
     }
   }, [isAuthenticated, user]);
@@ -74,7 +73,7 @@ export default function TherapistAvailabilityPage() {
       await Promise.all([
         fetchTemplates(),
         fetchSlots(),
-        fetchCalendar()
+        calculateCalendarData()
       ]);
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -86,9 +85,10 @@ export default function TherapistAvailabilityPage() {
 
   const fetchTemplates = async () => {
     try {
-      const response = await therapistApi.getAvailabilityTemplates();
+      if (!user?.id) return;
+      const response = await bookingApi.getTherapistTemplates(user.id);
       if (response.success && response.data) {
-        setTemplates(response.data.templates || []);
+        setTemplates(response.data);
       }
     } catch (error) {
       console.error('Error fetching templates:', error);
@@ -97,49 +97,75 @@ export default function TherapistAvailabilityPage() {
 
   const fetchSlots = async () => {
     try {
-      const response = await therapistApi.getAvailabilitySlots(dateRange);
+      if (!user?.id) return;
+      const response = await bookingApi.getTherapistTimeSlots(user.id, {
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate
+      });
       if (response.success && response.data) {
-        setSlots(response.data.slots || []);
+        setSlots(response.data);
       }
     } catch (error) {
       console.error('Error fetching slots:', error);
     }
   };
 
-  const fetchCalendar = async () => {
+  const calculateCalendarData = async () => {
     try {
-      const response = await therapistApi.getTherapistCalendar(dateRange);
-      if (response.success && response.data) {
-        setCalendarData(response.data);
-      }
+      if (!slots.length) return;
+      
+      const availableSlots = slots.filter(slot => !slot.isBooked && slot.isActive);
+      const bookedSlots = slots.filter(slot => slot.isBooked);
+      const totalSlots = slots.length;
+      const utilizationRate = totalSlots > 0 ? (bookedSlots.length / totalSlots) * 100 : 0;
+
+      setCalendarData({
+        summary: {
+          total_slots: totalSlots,
+          available_slots: availableSlots.length,
+          booked_slots: bookedSlots.length,
+          utilization_rate: utilizationRate
+        }
+      });
     } catch (error) {
-      console.error('Error fetching calendar:', error);
+      console.error('Error calculating calendar data:', error);
     }
   };
+
+  useEffect(() => {
+    calculateCalendarData();
+  }, [slots]);
 
   const handleTemplateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess('');
 
+    if (!user?.id) return;
+
     try {
+      const templateData = {
+        ...templateForm,
+        therapistId: user.id
+      } as TimeSlotTemplate;
+
       if (editingTemplate) {
-        await therapistApi.updateAvailabilityTemplate(editingTemplate.id!, templateForm);
+        await bookingApi.updateTemplate(editingTemplate._id!, templateData);
         setSuccess('Template updated successfully!');
       } else {
-        await therapistApi.createAvailabilityTemplate(templateForm as AvailabilityTemplate);
+        await bookingApi.createTemplate(templateData);
         setSuccess('Template created successfully!');
       }
       
       setShowTemplateModal(false);
       setEditingTemplate(null);
       setTemplateForm({
-        day_of_week: 1,
-        start_time: '09:00',
-        end_time: '17:00',
-        session_duration: 50,
-        break_between_sessions: 10,
-        is_active: true
+        dayOfWeek: 'monday',
+        startTime: '09:00',
+        endTime: '17:00',
+        sessionDuration: 50,
+        breakTime: 10,
+        isActive: true
       });
       
       await fetchTemplates();
@@ -153,7 +179,7 @@ export default function TherapistAvailabilityPage() {
     if (!confirm('Are you sure you want to delete this template?')) return;
 
     try {
-      await therapistApi.deleteAvailabilityTemplate(templateId);
+      await bookingApi.deleteTemplate(templateId);
       setSuccess('Template deleted successfully!');
       await fetchTemplates();
     } catch (error) {
@@ -168,12 +194,14 @@ export default function TherapistAvailabilityPage() {
     setSuccess('');
 
     try {
-      const response = await therapistApi.generateSlotsFromTemplate(generateForm);
+      const response = await bookingApi.generateTimeSlots(generateForm);
       if (response.success && response.data) {
-        setSuccess(`Generated ${response.data.slots.length} availability slots!`);
+        setSuccess(`Generated ${response.data!.generatedSlots.length} time slots!`);
+        if (response.data!.skippedSlots.length > 0) {
+          setSuccess(prev => prev + ` (${response.data!.skippedSlots.length} slots were skipped because they already exist)`);
+        }
         setShowGenerateModal(false);
         await fetchSlots();
-        await fetchCalendar();
       }
     } catch (error) {
       console.error('Error generating slots:', error);
@@ -181,24 +209,21 @@ export default function TherapistAvailabilityPage() {
     }
   };
 
-  const handleSlotStatusChange = async (slotId: number, newStatus: string) => {
+  const handleSlotStatusChange = async (slotId: number, newStatus: 'active' | 'inactive') => {
     try {
-      if (newStatus === 'blocked') {
-        await therapistApi.updateAvailabilitySlot(slotId, { status: 'blocked' });
-      } else if (newStatus === 'available') {
-        await therapistApi.updateAvailabilitySlot(slotId, { status: 'available' });
-      }
+      await bookingApi.updateTimeSlot(slotId, { 
+        isActive: newStatus === 'active' 
+      });
       
       setSuccess('Slot updated successfully!');
       await fetchSlots();
-      await fetchCalendar();
     } catch (error) {
       console.error('Error updating slot:', error);
       setError('Failed to update slot');
     }
   };
 
-  const editTemplate = (template: AvailabilityTemplate) => {
+  const editTemplate = (template: TimeSlotTemplate) => {
     setEditingTemplate(template);
     setTemplateForm(template);
     setShowTemplateModal(true);
@@ -208,14 +233,16 @@ export default function TherapistAvailabilityPage() {
     return new Date(`2000-01-01T${time}`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'available': return 'bg-green-100 text-green-800';
-      case 'booked': return 'bg-blue-100 text-blue-800';
-      case 'cancelled': return 'bg-red-100 text-red-800';
-      case 'blocked': return 'bg-gray-100 text-gray-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
+  const getStatusColor = (slot: TimeSlot) => {
+    if (!slot.isActive) return 'bg-gray-100 text-gray-800';
+    if (slot.isBooked) return 'bg-blue-100 text-blue-800';
+    return 'bg-green-100 text-green-800';
+  };
+
+  const getStatusText = (slot: TimeSlot) => {
+    if (!slot.isActive) return 'Inactive';
+    if (slot.isBooked) return 'Booked';
+    return 'Available';
   };
 
   if (isLoading || loading) {
@@ -343,22 +370,22 @@ export default function TherapistAvailabilityPage() {
                 {templates.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {templates.map((template) => (
-                      <div key={template.id} className="border rounded-lg p-4">
+                      <div key={template._id} className="border rounded-lg p-4">
                         <div className="flex items-center justify-between mb-3">
                           <h3 className="font-medium text-gray-900">
-                            {daysOfWeek.find(d => d.value === template.day_of_week)?.name}
+                            {daysOfWeek.find(d => d.value === template.dayOfWeek)?.name}
                           </h3>
                           <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            template.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                            template.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
                           }`}>
-                            {template.is_active ? 'Active' : 'Inactive'}
+                            {template.isActive ? 'Active' : 'Inactive'}
                           </span>
                         </div>
                         
                         <div className="space-y-2 text-sm text-gray-600">
-                          <p>Time: {formatTime(template.start_time)} - {formatTime(template.end_time)}</p>
-                          <p>Session Duration: {template.session_duration} minutes</p>
-                          <p>Break: {template.break_between_sessions} minutes</p>
+                          <p>Time: {formatTime(template.startTime)} - {formatTime(template.endTime)}</p>
+                          <p>Session Duration: {template.sessionDuration} minutes</p>
+                          <p>Break: {template.breakTime} minutes</p>
                         </div>
 
                         <div className="flex space-x-2 mt-4">
@@ -369,7 +396,7 @@ export default function TherapistAvailabilityPage() {
                             Edit
                           </button>
                           <button
-                            onClick={() => handleDeleteTemplate(template.id!)}
+                            onClick={() => handleDeleteTemplate(template._id!)}
                             className="flex-1 text-sm bg-red-50 text-red-700 py-2 px-3 rounded hover:bg-red-100"
                           >
                             Delete
@@ -418,19 +445,19 @@ export default function TherapistAvailabilityPage() {
                   <div className="flex space-x-3">
                     <input
                       type="date"
-                      value={dateRange.start_date}
-                      onChange={(e) => setDateRange(prev => ({ ...prev, start_date: e.target.value }))}
+                      value={dateRange.startDate}
+                      onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
                       className="px-3 py-2 border border-gray-300 rounded-md text-sm"
                     />
                     <span className="flex items-center text-gray-500">to</span>
                     <input
                       type="date"
-                      value={dateRange.end_date}
-                      onChange={(e) => setDateRange(prev => ({ ...prev, end_date: e.target.value }))}
+                      value={dateRange.endDate}
+                      onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
                       className="px-3 py-2 border border-gray-300 rounded-md text-sm"
                     />
                     <button
-                      onClick={() => { fetchSlots(); fetchCalendar(); }}
+                      onClick={() => { fetchSlots(); }}
                       className="px-4 py-2 bg-green-600 text-white rounded-md text-sm hover:bg-green-700"
                     >
                       Update
@@ -512,18 +539,19 @@ export default function TherapistAvailabilityPage() {
                   {slots.length > 0 ? (
                     <div className="space-y-3">
                       {slots.slice(0, 10).map((slot) => (
-                        <div key={slot.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded">
+                        <div key={slot._id} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded">
                           <div>
                             <p className="text-sm font-medium text-gray-900">
-                              {new Date(slot.start_datetime).toLocaleDateString()} at{' '}
-                              {new Date(slot.start_datetime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                              {new Date(slot.date).toLocaleDateString()} at {formatTime(slot.startTime)}
                             </p>
                             <p className="text-xs text-gray-500">
-                              {slot.session_type || 'Individual'} session
+                              Duration: {slot.endTime && slot.startTime ? 
+                                Math.round((new Date(`2000-01-01T${slot.endTime}`).getTime() - new Date(`2000-01-01T${slot.startTime}`).getTime()) / (1000 * 60)) 
+                                : 0} minutes
                             </p>
                           </div>
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(slot.status || 'available')}`}>
-                            {slot.status || 'available'}
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(slot)}`}>
+                            {getStatusText(slot)}
                           </span>
                         </div>
                       ))}
@@ -543,15 +571,15 @@ export default function TherapistAvailabilityPage() {
                   <div className="flex space-x-3">
                     <input
                       type="date"
-                      value={dateRange.start_date}
-                      onChange={(e) => setDateRange(prev => ({ ...prev, start_date: e.target.value }))}
+                      value={dateRange.startDate}
+                      onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
                       className="px-3 py-2 border border-gray-300 rounded-md text-sm"
                     />
                     <span className="flex items-center text-gray-500">to</span>
                     <input
                       type="date"
-                      value={dateRange.end_date}
-                      onChange={(e) => setDateRange(prev => ({ ...prev, end_date: e.target.value }))}
+                      value={dateRange.endDate}
+                      onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
                       className="px-3 py-2 border border-gray-300 rounded-md text-sm"
                     />
                     <button
@@ -575,9 +603,6 @@ export default function TherapistAvailabilityPage() {
                             Duration
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Type
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Status
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -587,38 +612,36 @@ export default function TherapistAvailabilityPage() {
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
                         {slots.map((slot) => (
-                          <tr key={slot.id}>
+                          <tr key={slot._id}>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                              {new Date(slot.start_datetime).toLocaleDateString()} at{' '}
-                              {new Date(slot.start_datetime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                              {new Date(slot.date).toLocaleDateString()} at {formatTime(slot.startTime)}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {Math.round((new Date(slot.end_datetime).getTime() - new Date(slot.start_datetime).getTime()) / (1000 * 60))} min
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {slot.session_type || 'Individual'}
+                              {slot.endTime && slot.startTime ? 
+                                Math.round((new Date(`2000-01-01T${slot.endTime}`).getTime() - new Date(`2000-01-01T${slot.startTime}`).getTime()) / (1000 * 60)) 
+                                : 0} min
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(slot.status || 'available')}`}>
-                                {slot.status || 'available'}
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(slot)}`}>
+                                {getStatusText(slot)}
                               </span>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                              {(slot.status === 'available' || slot.status === 'blocked') && (
+                              {!slot.isBooked && (
                                 <div className="flex space-x-2">
-                                  {slot.status === 'available' ? (
+                                  {slot.isActive ? (
                                     <button
-                                      onClick={() => handleSlotStatusChange(slot.id!, 'blocked')}
+                                      onClick={() => handleSlotStatusChange(slot._id!, 'inactive')}
                                       className="text-red-600 hover:text-red-900"
                                     >
-                                      Block
+                                      Deactivate
                                     </button>
                                   ) : (
                                     <button
-                                      onClick={() => handleSlotStatusChange(slot.id!, 'available')}
+                                      onClick={() => handleSlotStatusChange(slot._id!, 'active')}
                                       className="text-green-600 hover:text-green-900"
                                     >
-                                      Unblock
+                                      Activate
                                     </button>
                                   )}
                                 </div>
@@ -660,8 +683,8 @@ export default function TherapistAvailabilityPage() {
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Day of Week</label>
                     <select
-                      value={templateForm.day_of_week}
-                      onChange={(e) => setTemplateForm(prev => ({ ...prev, day_of_week: parseInt(e.target.value) }))}
+                      value={templateForm.dayOfWeek}
+                      onChange={(e) => setTemplateForm(prev => ({ ...prev, dayOfWeek: e.target.value as any }))}
                       className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-green-500 focus:border-green-500"
                       required
                     >
@@ -676,8 +699,8 @@ export default function TherapistAvailabilityPage() {
                       <label className="block text-sm font-medium text-gray-700">Start Time</label>
                       <input
                         type="time"
-                        value={templateForm.start_time}
-                        onChange={(e) => setTemplateForm(prev => ({ ...prev, start_time: e.target.value }))}
+                        value={templateForm.startTime}
+                        onChange={(e) => setTemplateForm(prev => ({ ...prev, startTime: e.target.value }))}
                         className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-green-500 focus:border-green-500"
                         required
                       />
@@ -686,8 +709,8 @@ export default function TherapistAvailabilityPage() {
                       <label className="block text-sm font-medium text-gray-700">End Time</label>
                       <input
                         type="time"
-                        value={templateForm.end_time}
-                        onChange={(e) => setTemplateForm(prev => ({ ...prev, end_time: e.target.value }))}
+                        value={templateForm.endTime}
+                        onChange={(e) => setTemplateForm(prev => ({ ...prev, endTime: e.target.value }))}
                         className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-green-500 focus:border-green-500"
                         required
                       />
@@ -699,8 +722,8 @@ export default function TherapistAvailabilityPage() {
                       <label className="block text-sm font-medium text-gray-700">Session Duration (min)</label>
                       <input
                         type="number"
-                        value={templateForm.session_duration}
-                        onChange={(e) => setTemplateForm(prev => ({ ...prev, session_duration: parseInt(e.target.value) }))}
+                        value={templateForm.sessionDuration}
+                        onChange={(e) => setTemplateForm(prev => ({ ...prev, sessionDuration: parseInt(e.target.value) }))}
                         className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-green-500 focus:border-green-500"
                         min="15"
                         step="5"
@@ -711,8 +734,8 @@ export default function TherapistAvailabilityPage() {
                       <label className="block text-sm font-medium text-gray-700">Break (min)</label>
                       <input
                         type="number"
-                        value={templateForm.break_between_sessions}
-                        onChange={(e) => setTemplateForm(prev => ({ ...prev, break_between_sessions: parseInt(e.target.value) }))}
+                        value={templateForm.breakTime}
+                        onChange={(e) => setTemplateForm(prev => ({ ...prev, breakTime: parseInt(e.target.value) }))}
                         className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-green-500 focus:border-green-500"
                         min="0"
                         step="5"
@@ -724,8 +747,8 @@ export default function TherapistAvailabilityPage() {
                   <div className="flex items-center">
                     <input
                       type="checkbox"
-                      checked={templateForm.is_active}
-                      onChange={(e) => setTemplateForm(prev => ({ ...prev, is_active: e.target.checked }))}
+                      checked={templateForm.isActive}
+                      onChange={(e) => setTemplateForm(prev => ({ ...prev, isActive: e.target.checked }))}
                       className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
                     />
                     <label className="ml-2 block text-sm text-gray-900">
@@ -747,12 +770,12 @@ export default function TherapistAvailabilityPage() {
                       setShowTemplateModal(false);
                       setEditingTemplate(null);
                       setTemplateForm({
-                        day_of_week: 1,
-                        start_time: '09:00',
-                        end_time: '17:00',
-                        session_duration: 50,
-                        break_between_sessions: 10,
-                        is_active: true
+                        dayOfWeek: 'monday',
+                        startTime: '09:00',
+                        endTime: '17:00',
+                        sessionDuration: 50,
+                        breakTime: 10,
+                        isActive: true
                       });
                     }}
                     className="flex-1 px-4 py-2 bg-gray-300 text-gray-800 text-sm font-medium rounded-md hover:bg-gray-400"
@@ -778,15 +801,18 @@ export default function TherapistAvailabilityPage() {
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Template</label>
                     <select
-                      value={generateForm.template_id}
-                      onChange={(e) => setGenerateForm(prev => ({ ...prev, template_id: parseInt(e.target.value) }))}
+                      value={generateForm.templateId}
+                      onChange={(e) => {
+                        console.log(e.target.value);
+                        setGenerateForm(prev => ({ ...prev, templateId: (e.target.value)}))
+                      }}
                       className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-green-500 focus:border-green-500"
                       required
                     >
                       <option value={0}>Select a template</option>
-                      {templates.filter(t => t.is_active).map(template => (
-                        <option key={template.id} value={template.id}>
-                          {daysOfWeek.find(d => d.value === template.day_of_week)?.name} - {formatTime(template.start_time)} to {formatTime(template.end_time)}
+                      {templates.filter(t => t.isActive).map(template => (
+                        <option key={template._id} value={template._id || 0}>
+                          {daysOfWeek.find(d => d.value === template.dayOfWeek)?.name} - {formatTime(template.startTime)} to {formatTime(template.endTime)}
                         </option>
                       ))}
                     </select>
@@ -796,8 +822,8 @@ export default function TherapistAvailabilityPage() {
                     <label className="block text-sm font-medium text-gray-700">Start Date</label>
                     <input
                       type="date"
-                      value={generateForm.start_date}
-                      onChange={(e) => setGenerateForm(prev => ({ ...prev, start_date: e.target.value }))}
+                      value={generateForm.startDate}
+                      onChange={(e) => setGenerateForm(prev => ({ ...prev, startDate: e.target.value }))}
                       className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-green-500 focus:border-green-500"
                       required
                     />
@@ -807,8 +833,8 @@ export default function TherapistAvailabilityPage() {
                     <label className="block text-sm font-medium text-gray-700">End Date</label>
                     <input
                       type="date"
-                      value={generateForm.end_date}
-                      onChange={(e) => setGenerateForm(prev => ({ ...prev, end_date: e.target.value }))}
+                      value={generateForm.endDate}
+                      onChange={(e) => setGenerateForm(prev => ({ ...prev, endDate: e.target.value }))}
                       className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-green-500 focus:border-green-500"
                       required
                     />
@@ -827,10 +853,9 @@ export default function TherapistAvailabilityPage() {
                     onClick={() => {
                       setShowGenerateModal(false);
                       setGenerateForm({
-                        template_id: 0,
-                        start_date: '',
-                        end_date: '',
-                        exclude_dates: []
+                        templateId: '',
+                        startDate: '',
+                        endDate: ''
                       });
                     }}
                     className="flex-1 px-4 py-2 bg-gray-300 text-gray-800 text-sm font-medium rounded-md hover:bg-gray-400"

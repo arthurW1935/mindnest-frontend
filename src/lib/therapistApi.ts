@@ -2,6 +2,7 @@
 
 interface TherapistProfile {
     id?: number;
+    auth_user_id?: number;
     first_name?: string;
     last_name?: string;
     title?: string;
@@ -177,6 +178,10 @@ interface TherapistProfile {
   
     async getPublicTherapistProfile(therapistId: number): Promise<ApiResponse<{ therapist: TherapistProfile }>> {
       return this.makeRequest(`/api/therapists/public/${therapistId}`);
+    }
+
+    async getPublicTherapistProfileFromAuthId(therapistId: number): Promise<ApiResponse<{ therapist: TherapistProfile }>> {
+      return this.makeRequest(`/api/therapists/public/auth/${therapistId}`);
     }
   
     async getSpecializations(): Promise<ApiResponse<{ specializations: Record<string, Specialization[]>; all: Specialization[] }>> {

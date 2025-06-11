@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { therapistApi, TherapistProfile } from '@/lib/therapistApi';
 import { useRouter, useParams } from 'next/navigation';
+import BookingModal from '@/components/BookingModal';
 
 interface Review {
   id: number;
@@ -97,6 +98,16 @@ export default function TherapistDetailPage() {
     } finally {
       setReviewsLoading(false);
     }
+  };
+
+  const handleBookingSuccess = (booking: any) => {
+    console.log('Booking created successfully:', booking);
+    // You can add additional success handling here, like showing a notification
+    // or redirecting to a booking confirmation page
+  };
+
+  const handleCloseBookingModal = () => {
+    setShowBookingModal(false);
   };
 
   const renderStarRating = (rating: number, size: 'sm' | 'md' | 'lg' = 'md') => {
@@ -549,28 +560,15 @@ export default function TherapistDetailPage() {
         </div>
       </div>
 
-      {/* Booking Modal Placeholder */}
+      {/* Booking Modal */}
       {showBookingModal && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-            <div className="mt-3 text-center">
-              <h3 className="text-lg font-medium text-gray-900">Book Session</h3>
-              <div className="mt-4 px-7 py-3">
-                <p className="text-sm text-gray-500">
-                  Booking functionality will be implemented with the booking service.
-                </p>
-              </div>
-              <div className="items-center px-4 py-3">
-                <button
-                  onClick={() => setShowBookingModal(false)}
-                  className="px-4 py-2 bg-gray-300 text-gray-800 text-base font-medium rounded-md w-full shadow-sm hover:bg-gray-400"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <BookingModal
+          isOpen={showBookingModal}
+          onClose={handleCloseBookingModal}
+          therapistId={therapistId}
+          therapistName={displayName}
+          onBookingSuccess={handleBookingSuccess}
+        />
       )}
     </div>
   );

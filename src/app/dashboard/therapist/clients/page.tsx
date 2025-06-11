@@ -2,43 +2,24 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { therapistApi } from '@/lib/therapistApi';
+import { bookingApi, Booking } from '@/lib/bookingApi';
+import { userApi } from '@/lib/userApi';
 import { useRouter } from 'next/navigation';
 
 interface Client {
   id: number;
-  user_id: number;
+  patientId: number;
   first_name?: string;
   last_name?: string;
-  email: string;
-  relationship_status: string;
-  session_rate?: number;
-  currency?: string;
-  notes?: string;
-  created_at: string;
+  email?: string;
   last_session?: string;
   total_sessions?: number;
   next_session?: string;
 }
 
-interface Session {
-  id: number;
-  user_id: number;
-  start_datetime: string;
-  end_datetime: string;
-  session_type: string;
-  status: string;
-  notes?: string;
-}
-
-interface SessionResponse {
-  sessions: Session[];
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    pages: number;
-  };
+interface BookingWithClient extends Booking {
+  clientName?: string;
+  clientEmail?: string;
 }
 
 export default function TherapistClientsPage() {
@@ -46,23 +27,23 @@ export default function TherapistClientsPage() {
   const router = useRouter();
   
   const [clients, setClients] = useState<Client[]>([]);
-  const [upcomingSessions, setUpcomingSessions] = useState<Session[]>([]);
-  const [sessionHistory, setSessionHistory] = useState<Session[]>([]);
+  const [bookings, setBookings] = useState<BookingWithClient[]>([]);
+  const [upcomingSessions, setUpcomingSessions] = useState<BookingWithClient[]>([]);
+  const [pastSessions, setPastSessions] = useState<BookingWithClient[]>([]);
+  const [sessionHistory, setSessionHistory] = useState<BookingWithClient[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [activeTab, setActiveTab] = useState<'clients' | 'upcoming' | 'history'>('clients');
+  const [activeTab, setActiveTab] = useState<'clients' | 'upcoming' | 'past' |'history'>('clients');
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [showClientModal, setShowClientModal] = useState(false);
   
   // Pagination
-  const [clientsPage, setClientsPage] = useState(1);
-  const [sessionHistoryPage, setSessionHistoryPage] = useState(1);
-  const [clientsPagination, setClientsPagination] = useState({ page: 1, limit: 10, total: 0, pages: 0 });
-  const [historyPagination, setHistoryPagination] = useState({ page: 1, limit: 10, total: 0, pages: 0 });
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, pages: 0 });
 
   // Filters
-  const [clientFilter, setClientFilter] = useState('all'); // all, active, inactive
+  const [statusFilter, setStatusFilter] = useState('all'); // all, confirmed, completed, cancelled
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
@@ -74,23 +55,22 @@ export default function TherapistClientsPage() {
   }, [isLoading, isAuthenticated, user, router]);
 
   useEffect(() => {
-    if (isAuthenticated && user?.role === 'psychiatrist') {
+    if (isAuthenticated && user?.role === 'psychiatrist' && user.id) {
       fetchData();
     }
   }, [isAuthenticated, user]);
 
   useEffect(() => {
-    if (isAuthenticated && user?.role === 'psychiatrist') {
-      fetchClients();
-    }
-  }, [clientsPage, clientFilter, searchTerm, isAuthenticated, user]);
+    buildClientsList();
+  }, [bookings, searchTerm]);
 
   const fetchData = async () => {
     try {
       setLoading(true);
       await Promise.all([
-        fetchClients(),
+        fetchBookings(),
         fetchUpcomingSessions(),
+        fetchPastSessions,
         fetchSessionHistory()
       ]);
     } catch (error) {
@@ -101,38 +81,126 @@ export default function TherapistClientsPage() {
     }
   };
 
-  const fetchClients = async () => {
+  const fetchBookings = async () => {
     try {
-      const response = await therapistApi.getTherapistClients({
-        status: clientFilter !== 'all' ? clientFilter : undefined,
-        page: clientsPage,
-        limit: 10
+      if (!user?.id) return;
+      
+      const response = await bookingApi.getTherapistBookings(user.id, {
+        page: 1,
+        limit: 100 // Get more to build comprehensive client list
       });
 
       if (response.success && response.data) {
-        let filteredClients = response.data.clients || [];
-        
-        // Apply search filter
-        if (searchTerm) {
-          filteredClients = filteredClients.filter((client: Client) =>
-            `${client.first_name || ''} ${client.last_name || ''}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            client.email.toLowerCase().includes(searchTerm.toLowerCase())
-          );
-        }
+        // Fetch client details for each booking
+        const bookingsWithClients = await Promise.all(
+          response.data.map(async (booking) => {
+            try {
+              const userResponse = await userApi.getUserByAuthId(booking.patientId);
+              const client = userResponse.data?.user;
 
-        setClients(filteredClients);
-        setClientsPagination(response.data.pagination || { page: 1, limit: 10, total: 0, pages: 0 });
+              return {
+                ...booking,
+                clientName: `${client.first_name ?? ''} ${client.last_name ?? ''}`,
+                clientEmail: (client.email ?? '')
+              } as BookingWithClient;
+            } catch (error) {
+              return {
+                ...booking,
+                clientName: `Client ${booking.patientId}`,
+                clientEmail: 'client@example.com'
+              } as BookingWithClient;
+            }
+          })
+        );
+
+        setBookings(bookingsWithClients);
       }
     } catch (error) {
-      console.error('Error fetching clients:', error);
+      console.error('Error fetching bookings:', error);
     }
   };
 
   const fetchUpcomingSessions = async () => {
     try {
-      const response = await therapistApi.getUpcomingSessions();
+      if (!user?.id) return;
+      
+      const today = new Date().toISOString().split('T')[0];
+      const response = await bookingApi.getTherapistBookings(user.id, {
+        startDate: today,
+        status: 'confirmed'
+      });
+
       if (response.success && response.data) {
-        setUpcomingSessions(response.data.sessions || []);
+        const upcomingBookings = response.data.filter(booking => 
+          booking.sessionDate >= today && booking.status === 'confirmed'
+        );
+
+        const bookingsWithClients = await Promise.all(
+          upcomingBookings.map(async (booking) => {
+            try {
+              const userResponse = await userApi.getUserByAuthId(booking.patientId);
+              const client = userResponse.data?.user;
+
+              return {
+                ...booking,
+                clientName: `${client.first_name ?? ''} ${client.last_name ?? ''}`,
+                clientEmail: (client.email ?? '')
+              } as BookingWithClient;
+            } catch (error) {
+              return {
+                ...booking,
+                clientName: `Client ${booking.patientId}`,
+                clientEmail: 'client@example.com'
+              } as BookingWithClient;
+            }
+          })
+        );
+
+        setUpcomingSessions(bookingsWithClients);
+      }
+    } catch (error) {
+      console.error('Error fetching upcoming sessions:', error);
+    }
+  };
+
+  const fetchPastSessions = async () => {
+    try {
+      if (!user?.id) return;
+      
+      const today = new Date();
+      const response = await bookingApi.getTherapistBookings(user.id, {
+        startDate: today.toISOString().split('T')[0],
+      });
+
+      if (response.success && response.data) {
+        const pastBookings = response.data.filter(booking => 
+          new Date(`${booking.sessionDate.split('T')[0]}T${booking.sessionStartTime}`) < today
+        );
+
+        const bookingsWithClients = await Promise.all(
+          pastBookings.map(async (booking) => {
+            try {
+              const userResponse = await userApi.getUserByAuthId(booking.patientId);
+              const client = userResponse.data?.user;
+
+              return {
+                ...booking,
+                clientName: `${client.first_name ?? ''} ${client.last_name ?? ''}`,
+                clientEmail: (client.email ?? '')
+              } as BookingWithClient;
+            } catch (error) {
+              return {
+                ...booking,
+                clientName: `Client ${booking.patientId}`,
+                clientEmail: 'client@example.com'
+              } as BookingWithClient;
+            }
+          })
+        );
+
+        console.log("past", bookingsWithClients);
+
+        setPastSessions(bookingsWithClients);
       }
     } catch (error) {
       console.error('Error fetching upcoming sessions:', error);
@@ -141,28 +209,116 @@ export default function TherapistClientsPage() {
 
   const fetchSessionHistory = async () => {
     try {
-      const response = await therapistApi.getSessionHistory({
-        page: sessionHistoryPage,
+      if (!user?.id) return;
+      
+      const response = await bookingApi.getTherapistBookings(user.id, {
+        page,
         limit: 10
       });
+
       if (response.success && response.data) {
-        const data = response.data as SessionResponse;
-        setSessionHistory(data.sessions || []);
-        setHistoryPagination(data.pagination || { page: 1, limit: 10, total: 0, pages: 0 });
+        const bookingsWithClients = await Promise.all(
+          response.data.map(async (booking) => {
+            try {
+              const userResponse = await userApi.getUserByAuthId(booking.patientId);
+              const client = userResponse.data?.user;
+
+              return {
+                ...booking,
+                clientName: `${client.first_name ?? ''} ${client.last_name ?? ''}`,
+                clientEmail: (client.email ?? '')
+              } as BookingWithClient;
+            } catch (error) {
+              return {
+                ...booking,
+                clientName: `Client ${booking.patientId}`,
+                clientEmail: 'client@example.com'
+              } as BookingWithClient;
+            }
+          })
+        );
+
+        setSessionHistory(bookingsWithClients);
+        setPagination({ page, limit: 10, total: response.data.length, pages: Math.ceil(response.data.length / 10) });
       }
     } catch (error) {
       console.error('Error fetching session history:', error);
     }
   };
 
+  const buildClientsList = () => {
+    // Build unique clients list from bookings
+    const clientsMap = new Map<number, Client>();
+    
+    bookings.forEach(booking => {
+      const clientId = booking.patientId;
+      if (!clientsMap.has(clientId)) {
+        const clientBookings = bookings.filter(b => b.patientId === clientId);
+        const completedSessions = clientBookings.filter(b => b.status === 'completed');
+        const upcomingSession = clientBookings.find(b => 
+          b.status === 'confirmed' && 
+          b.sessionDate >= new Date().toISOString().split('T')[0]
+        );
+
+        console.log(upcomingSession);
+        const lastSession = completedSessions
+          .sort((a, b) => new Date(b.sessionDate).getTime() - new Date(a.sessionDate).getTime())[0];
+
+        clientsMap.set(clientId, {
+          id: clientId,
+          patientId: clientId,
+          first_name: booking.clientName?.split(' ')[0] || 'Client',
+          last_name: booking.clientName?.split(' ')[1] || clientId.toString(),
+          email: booking.clientEmail || 'client@example.com',
+          total_sessions: completedSessions.length,
+          last_session: lastSession?.sessionDate,
+          next_session: upcomingSession?.sessionDate
+        });
+      }
+    });
+
+    console.log(clientsMap)
+
+    let clientsList = Array.from(clientsMap.values());
+    
+    // Apply search filter
+    if (searchTerm) {
+      clientsList = clientsList.filter(client =>
+        `${client.first_name} ${client.last_name}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        client.email?.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    setClients(clientsList);
+  };
+
+  useEffect(() => {
+    buildClientsList();
+  }, [bookings, searchTerm]);
+
   const handleCancelSession = async (sessionId: number) => {
-    if (!confirm('Are you sure you want to cancel this session?')) return;
+    if (!confirm('Are you sure you want to cancel this session?') || !user?.id) return;
 
     try {
-      await therapistApi.cancelSession(sessionId, 'Cancelled by therapist');
+      await bookingApi.cancelBooking(sessionId, {
+        cancellationReason: 'Cancelled by therapist',
+        cancelledBy: 'therapist'
+      });
       setSuccess('Session cancelled successfully');
-      await fetchUpcomingSessions();
-      await fetchSessionHistory();
+      await fetchData();
+    } catch (error) {
+      console.error('Error cancelling session:', error);
+      setError('Failed to cancel session');
+    }
+  };
+
+  const handleUpdateStatusSession = async (sessionId: number, status: string) => {
+    if (!confirm(`Are you sure you want to mark this session as ${status}?`) || !user?.id) return;
+
+    try {
+      await bookingApi.updateBookingStatus(sessionId, status);
+      setSuccess('Session cancelled successfully');
+      await fetchData();
     } catch (error) {
       console.error('Error cancelling session:', error);
       setError('Failed to cancel session');
@@ -171,21 +327,19 @@ export default function TherapistClientsPage() {
 
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
-      case 'active': return 'bg-green-100 text-green-800';
-      case 'inactive': return 'bg-gray-100 text-gray-800';
-      case 'pending': return 'bg-yellow-100 text-yellow-800';
+      case 'confirmed': return 'bg-green-100 text-green-800';
       case 'completed': return 'bg-blue-100 text-blue-800';
       case 'cancelled': return 'bg-red-100 text-red-800';
-      case 'scheduled': return 'bg-blue-100 text-blue-800';
+      case 'no-show': return 'bg-yellow-100 text-yellow-800';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
 
-  const formatDateTime = (dateTime: string) => {
-    const date = new Date(dateTime);
+  const formatDateTime = (date: string, time: string) => {
+    const dateTime = new Date(`${date.split('T')[0]}T${time}`);
     return {
-      date: date.toLocaleDateString(),
-      time: date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+      date: dateTime.toLocaleDateString(),
+      time: dateTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
     };
   };
 
@@ -270,7 +424,7 @@ export default function TherapistClientsPage() {
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-500">Total Clients</p>
-                <p className="text-2xl font-semibold text-gray-900">{clientsPagination.total}</p>
+                <p className="text-2xl font-semibold text-gray-900">{clients.length}</p>
               </div>
             </div>
           </div>
@@ -302,7 +456,7 @@ export default function TherapistClientsPage() {
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-500">Total Sessions</p>
-                <p className="text-2xl font-semibold text-gray-900">{historyPagination.total}</p>
+                <p className="text-2xl font-semibold text-gray-900">{bookings.length}</p>
               </div>
             </div>
           </div>
@@ -320,7 +474,7 @@ export default function TherapistClientsPage() {
                 <p className="text-sm font-medium text-gray-500">This Week</p>
                 <p className="text-2xl font-semibold text-gray-900">
                   {upcomingSessions.filter(session => {
-                    const sessionDate = new Date(session.start_datetime);
+                    const sessionDate = new Date(session.sessionDate);
                     const weekFromNow = new Date();
                     weekFromNow.setDate(weekFromNow.getDate() + 7);
                     return sessionDate <= weekFromNow;
@@ -343,7 +497,7 @@ export default function TherapistClientsPage() {
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
-                Clients ({clientsPagination.total})
+                Clients ({clients.length})
               </button>
               <button
                 onClick={() => setActiveTab('upcoming')}
@@ -372,26 +526,15 @@ export default function TherapistClientsPage() {
             {/* Clients Tab */}
             {activeTab === 'clients' && (
               <div>
-                {/* Filters */}
-                <div className="flex flex-col sm:flex-row gap-4 mb-6">
-                  <div className="flex-1">
-                    <input
-                      type="text"
-                      placeholder="Search clients..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500"
-                    />
-                  </div>
-                  <select
-                    value={clientFilter}
-                    onChange={(e) => setClientFilter(e.target.value)}
-                    className="px-4 py-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500"
-                  >
-                    <option value="all">All Clients</option>
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
+                {/* Search */}
+                <div className="mb-6">
+                  <input
+                    type="text"
+                    placeholder="Search clients..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500"
+                  />
                 </div>
 
                 {/* Clients List */}
@@ -404,16 +547,13 @@ export default function TherapistClientsPage() {
                             Client
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Status
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Sessions
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Rate
+                            Last Session
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Last Session
+                            Next Session
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Actions
@@ -428,7 +568,7 @@ export default function TherapistClientsPage() {
                                 <div className="flex-shrink-0 h-10 w-10">
                                   <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
                                     <span className="text-sm font-medium text-green-800">
-                                      {(client.first_name?.[0] || client.email[0]).toUpperCase()}
+                                      {(client.first_name?.[0] || client.email?.[0] || 'C').toUpperCase()}
                                     </span>
                                   </div>
                                 </div>
@@ -436,39 +576,31 @@ export default function TherapistClientsPage() {
                                   <div className="text-sm font-medium text-gray-900">
                                     {client.first_name && client.last_name 
                                       ? `${client.first_name} ${client.last_name}`
-                                      : client.email.split('@')[0]
+                                      : client.email?.split('@')[0] || `Client ${client.patientId}`
                                     }
                                   </div>
                                   <div className="text-sm text-gray-500">{client.email}</div>
                                 </div>
                               </div>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(client.relationship_status)}`}>
-                                {client.relationship_status}
-                              </span>
-                            </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                               {client.total_sessions || 0}
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                              ${client.session_rate || 0}/{client.currency || 'USD'}
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              {client.last_session ? client.last_session.split('T')[0] : 'Never'}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {client.last_session ? new Date(client.last_session).toLocaleDateString() : 'Never'}
+                              {client.next_session ? client.next_session.split('T')[0] : 'None scheduled'}
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            <td className="px-6 py-4 text-sm font-medium">
                               <button
                                 onClick={() => {
                                   setSelectedClient(client);
                                   setShowClientModal(true);
                                 }}
-                                className="text-green-600 hover:text-green-900 mr-3"
+                                className="text-blue-600 rounded-sm hover:text-blue-900 bg-blue-100 px-2 py-1 m-1"
                               >
                                 View
-                              </button>
-                              <button className="text-blue-600 hover:text-blue-900">
-                                Message
                               </button>
                             </td>
                           </tr>
@@ -497,9 +629,9 @@ export default function TherapistClientsPage() {
                 {upcomingSessions.length > 0 ? (
                   <div className="space-y-4">
                     {upcomingSessions.map((session) => {
-                      const { date, time } = formatDateTime(session.start_datetime);
+                      const { date, time } = formatDateTime(session.sessionDate, session.sessionStartTime);
                       return (
-                        <div key={session.id} className="border rounded-lg p-4">
+                        <div key={session._id} className="border rounded-lg p-4">
                           <div className="flex items-center justify-between">
                             <div className="flex-1">
                               <div className="flex items-center space-x-3">
@@ -512,7 +644,7 @@ export default function TherapistClientsPage() {
                                 </div>
                                 <div>
                                   <p className="text-sm font-medium text-gray-900">
-                                    {session.session_type} Session - Client ID: {session.user_id}
+                                    Session with {session.clientName}
                                   </p>
                                   <p className="text-sm text-gray-500">
                                     {date} at {time}
@@ -524,14 +656,26 @@ export default function TherapistClientsPage() {
                               </div>
                             </div>
                             <div className="flex items-center space-x-3">
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(session.status)}`}>
-                                {session.status}
-                              </span>
+                              
                               <button
-                                onClick={() => handleCancelSession(session.id)}
-                                className="text-red-600 hover:text-red-900 text-sm"
+                                onClick={() => handleCancelSession(session._id!)}
+                                className="text-red-600 hover:text-red-900 bg-red-100 rounded-sm px-2 py-1 m-1 text-sm"
                               >
                                 Cancel
+                              </button>
+                              
+                              <button 
+                                onClick={() => handleUpdateStatusSession(session._id!, 'completed')}
+                                className="text-green-600 hover:text-green-900 bg-green-100 rounded-sm px-2 py-1 m-1 text-sm"
+                              >
+                                Mark as Completed
+                              </button>
+
+                              <button 
+                                onClick={() => handleUpdateStatusSession(session._id!, 'no-show')}
+                                className="text-blue-600 hover:text-blue-900 bg-blue-100 rounded-sm px-2 py-1 m-1 text-sm"
+                              >
+                                Mark as No-Show
                               </button>
                             </div>
                           </div>
@@ -569,9 +713,6 @@ export default function TherapistClientsPage() {
                             Client
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Type
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Status
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -584,19 +725,19 @@ export default function TherapistClientsPage() {
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
                         {sessionHistory.map((session) => {
-                          const { date, time } = formatDateTime(session.start_datetime);
-                          const duration = Math.round((new Date(session.end_datetime).getTime() - new Date(session.start_datetime).getTime()) / (1000 * 60));
+                          const { date, time } = formatDateTime(session.sessionDate, session.sessionStartTime);
+                          const duration = Math.round(
+                            (new Date(`${session.sessionDate.split('T')[0]}T${session.sessionEndTime}`).getTime() - 
+                             new Date(`${session.sessionDate.split('T')[0]}T${session.sessionStartTime}`).getTime()) / (1000 * 60)
+                          );
                           return (
-                            <tr key={session.id} className="hover:bg-gray-50">
+                            <tr key={session._id} className="hover:bg-gray-50">
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                 <div>{date}</div>
                                 <div className="text-xs text-gray-500">{time}</div>
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                Client ID: {session.user_id}
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                {session.session_type}
+                                {session.clientName}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap">
                                 <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(session.status)}`}>
@@ -626,112 +767,10 @@ export default function TherapistClientsPage() {
                     </p>
                   </div>
                 )}
-
-                {/* Pagination for Session History */}
-                {historyPagination.pages > 1 && (
-                  <div className="mt-6 flex items-center justify-between">
-                    <div className="flex-1 flex justify-between sm:hidden">
-                      <button
-                        onClick={() => setSessionHistoryPage(Math.max(1, sessionHistoryPage - 1))}
-                        disabled={sessionHistoryPage <= 1}
-                        className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-                      >
-                        Previous
-                      </button>
-                      <button
-                        onClick={() => setSessionHistoryPage(Math.min(historyPagination.pages, sessionHistoryPage + 1))}
-                        disabled={sessionHistoryPage >= historyPagination.pages}
-                        className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-                      >
-                        Next
-                      </button>
-                    </div>
-                    <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-                      <div>
-                        <p className="text-sm text-gray-700">
-                          Showing <span className="font-medium">{((sessionHistoryPage - 1) * 10) + 1}</span> to{' '}
-                          <span className="font-medium">
-                            {Math.min(sessionHistoryPage * 10, historyPagination.total)}
-                          </span>{' '}
-                          of <span className="font-medium">{historyPagination.total}</span> sessions
-                        </p>
-                      </div>
-                      <div>
-                        <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
-                          <button
-                            onClick={() => setSessionHistoryPage(Math.max(1, sessionHistoryPage - 1))}
-                            disabled={sessionHistoryPage <= 1}
-                            className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
-                          >
-                            Previous
-                          </button>
-                          <button
-                            onClick={() => setSessionHistoryPage(Math.min(historyPagination.pages, sessionHistoryPage + 1))}
-                            disabled={sessionHistoryPage >= historyPagination.pages}
-                            className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
-                          >
-                            Next
-                          </button>
-                        </nav>
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </div>
         </div>
-
-        {/* Pagination for Clients */}
-        {activeTab === 'clients' && clientsPagination.pages > 1 && (
-          <div className="mt-6 flex items-center justify-between">
-            <div className="flex-1 flex justify-between sm:hidden">
-              <button
-                onClick={() => setClientsPage(Math.max(1, clientsPage - 1))}
-                disabled={clientsPage <= 1}
-                className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <button
-                onClick={() => setClientsPage(Math.min(clientsPagination.pages, clientsPage + 1))}
-                disabled={clientsPage >= clientsPagination.pages}
-                className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-            <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm text-gray-700">
-                  Showing <span className="font-medium">{((clientsPage - 1) * 10) + 1}</span> to{' '}
-                  <span className="font-medium">
-                    {Math.min(clientsPage * 10, clientsPagination.total)}
-                  </span>{' '}
-                  of <span className="font-medium">{clientsPagination.total}</span> clients
-                </p>
-              </div>
-              <div>
-                <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
-                  <button
-                    onClick={() => setClientsPage(Math.max(1, clientsPage - 1))}
-                    disabled={clientsPage <= 1}
-                    className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    Previous
-                  </button>
-                  <button
-                    onClick={() => setClientsPage(Math.min(clientsPagination.pages, clientsPage + 1))}
-                    disabled={clientsPage >= clientsPagination.pages}
-                    className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    Next
-                  </button>
-                </nav>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Client Detail Modal */}
@@ -756,7 +795,7 @@ export default function TherapistClientsPage() {
                   <div className="flex-shrink-0 h-12 w-12">
                     <div className="h-12 w-12 rounded-full bg-green-100 flex items-center justify-center">
                       <span className="text-lg font-medium text-green-800">
-                        {(selectedClient.first_name?.[0] || selectedClient.email[0]).toUpperCase()}
+                        {(selectedClient.first_name?.[0] || selectedClient.email?.[0] || 'C').toUpperCase()}
                       </span>
                     </div>
                   </div>
@@ -764,7 +803,7 @@ export default function TherapistClientsPage() {
                     <div className="text-lg font-medium text-gray-900">
                       {selectedClient.first_name && selectedClient.last_name 
                         ? `${selectedClient.first_name} ${selectedClient.last_name}`
-                        : selectedClient.email.split('@')[0]
+                        : selectedClient.email?.split('@')[0] || `Client ${selectedClient.patientId}`
                       }
                     </div>
                     <div className="text-sm text-gray-500">{selectedClient.email}</div>
@@ -773,22 +812,6 @@ export default function TherapistClientsPage() {
 
                 <div className="border-t pt-3">
                   <dl className="space-y-2">
-                    <div>
-                      <dt className="text-sm font-medium text-gray-500">Status</dt>
-                      <dd className="mt-1">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(selectedClient.relationship_status)}`}>
-                          {selectedClient.relationship_status}
-                        </span>
-                      </dd>
-                    </div>
-                    
-                    <div>
-                      <dt className="text-sm font-medium text-gray-500">Session Rate</dt>
-                      <dd className="mt-1 text-sm text-gray-900">
-                        ${selectedClient.session_rate || 0} {selectedClient.currency || 'USD'}
-                      </dd>
-                    </div>
-                    
                     <div>
                       <dt className="text-sm font-medium text-gray-500">Total Sessions</dt>
                       <dd className="mt-1 text-sm text-gray-900">{selectedClient.total_sessions || 0}</dd>
@@ -809,18 +832,12 @@ export default function TherapistClientsPage() {
                     </div>
                     
                     <div>
-                      <dt className="text-sm font-medium text-gray-500">Member Since</dt>
+                      <dt className="text-sm font-medium text-gray-500">Client Since</dt>
                       <dd className="mt-1 text-sm text-gray-900">
-                        {new Date(selectedClient.created_at).toLocaleDateString()}
+                        {/* We'd need to track when the client first booked */}
+                        Recently
                       </dd>
                     </div>
-                    
-                    {selectedClient.notes && (
-                      <div>
-                        <dt className="text-sm font-medium text-gray-500">Notes</dt>
-                        <dd className="mt-1 text-sm text-gray-900">{selectedClient.notes}</dd>
-                      </div>
-                    )}
                   </dl>
                 </div>
 
